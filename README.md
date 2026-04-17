@@ -21,13 +21,40 @@ code-review-single-skill/
 
 ## Usage
 
-Trigger the skill by mentioning **code review**, **review**, or **code quality** in your prompt.
+### Step 1 — Navigate to the target repository
+
+```bash
+cd /path/to/your/repo
+```
+
+### Step 2 — Start a Claude Code session and trigger the skill
+
+There are two ways to trigger the skill:
+
+**Option A — Slash command (recommended)**
+
+```
+/code-review-single
+```
+
+**Option B — Natural language**
+
+Mention **code review**, **review**, or **code quality** in your prompt:
+
+```
+code review
+review my changes
+check code quality
+```
+
+---
 
 ### Mode 1 — Source Branch (default)
 
 Compares the current branch against the branch it was created from.
 
 ```
+/code-review-single
 code review
 ```
 
@@ -36,6 +63,7 @@ code review
 Reviews the last N commits on the current branch.
 
 ```
+/code-review-single last 3
 review the last 3 commits
 code review latest 2
 ```
@@ -45,6 +73,7 @@ code review latest 2
 Diffs from a specific commit hash to HEAD. Takes priority over other modes.
 
 ```
+/code-review-single abc1234
 code review abc1234
 review mf525235
 ```
@@ -54,6 +83,7 @@ review mf525235
 Prefix with `@component-name/` to scope the review to a subdirectory.
 
 ```
+/code-review-single @src/auth/
 code review @src/auth/
 ```
 
@@ -127,13 +157,40 @@ code-review-single-skill/
 
 ## 使用方法
 
-在提示词中提及 **code review**、**review** 或 **code quality** 即可触发本 Skill。
+### 第一步 — 切换到目标仓库目录
+
+```bash
+cd /path/to/your/repo
+```
+
+### 第二步 — 启动 Claude Code 会话并触发 Skill
+
+有两种触发方式：
+
+**方式 A — Slash 命令（推荐）**
+
+```
+/code-review-single
+```
+
+**方式 B — 自然语言**
+
+在提示词中提及 **code review**、**review** 或 **code quality**：
+
+```
+code review
+review my changes
+check code quality
+```
+
+---
 
 ### 模式一：源分支（默认）
 
 将当前分支与其创建来源的分支进行对比。
 
 ```
+/code-review-single
 code review
 ```
 
@@ -142,6 +199,7 @@ code review
 审查当前分支最近 N 个提交。
 
 ```
+/code-review-single last 3
 review the last 3 commits
 code review latest 2
 ```
@@ -151,6 +209,7 @@ code review latest 2
 从指定提交哈希到 HEAD 的 diff，优先级最高。
 
 ```
+/code-review-single abc1234
 code review abc1234
 review mf525235
 ```
@@ -160,6 +219,7 @@ review mf525235
 使用 `@component-name/` 前缀将审查范围限定到子目录。
 
 ```
+/code-review-single @src/auth/
 code review @src/auth/
 ```
 
