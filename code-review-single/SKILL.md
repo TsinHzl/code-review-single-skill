@@ -1,7 +1,8 @@
 ---
 name: code-review-single
-description: Single-repo Code Review expert. Extracts the current branch diff via Git, performs deep review of logic bugs, boundary gaps, readability, performance, and security issues. Generates a complete Code Review report covering critical issues, improvement suggestions, and elegant refactoring proposals.
-trigger: Triggered when the user requests a Code Review, code audit, or review of the current commit in a single repository. Keywords: code review, review, code quality check.
+description: Single-repo Code Review expert. Extracts the current branch diff via Git tracing, performs deep review of logic bugs, boundary gaps, readability, performance, and security issues. Generates a complete Code Review report covering critical issues, improvement suggestions, and elegant refactoring proposals.
+trigger: Triggered when the user requests a Code Review, code audit, or review of the current commit in a single repository. Keywords: code review, review, code quality check, audit.
+
 
 ---
 
@@ -9,7 +10,7 @@ trigger: Triggered when the user requests a Code Review, code audit, or review o
 
 ## Trigger Conditions
 
-- User input contains: code review, review, code quality
+- User input contains: code review, review, code quality, audit
 - User requests a review of changes on the current branch (single-repo scenario)
 
 ## Input Parameters
@@ -26,9 +27,9 @@ trigger: Triggered when the user requests a Code Review, code audit, or review o
 
 Execute strictly in the following two steps. Step 1 must be completed in a single terminal/code execution tool run:
 
-### Step 1: Environment Resolution & Diff Extraction (run all at once)
+### Step 1: Environment Resolution & Diff Extraction (single execution)
 
-Use the terminal/code execution tool to run the following complete Bash script in one shot. Before running, replace the three variables at the top of the script:
+Use the terminal/code execution tool to run the following complete Bash script in one shot. Before running, replace the variables at the top of the script:
 
 - `PARAM`: the user's `$ARGUMENTS` input, leave empty if none
 - `COMMIT_COUNT_RAW`: number extracted from natural language, e.g. "last two" → 2, leave empty if none
@@ -37,8 +38,6 @@ Use the terminal/code execution tool to run the following complete Bash script i
 ```bash
 #!/bin/bash
 PARAM="<replace with user input parameter, leave empty if none>"
-COMMIT_COUNT_RAW="<replace with commit count number extracted from user input, leave empty if none>"
-COMMIT_HASH_RAW="<replace with commit hash extracted from user input, leave empty if none>"
 
 # 1. Path resolution: strip @ and trailing /, then try to cd into it
 if [ -n "$PARAM" ]; then
@@ -55,62 +54,71 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 REPO_NAME=$(basename "$(pwd)")
+
+# 2. Get current branch and source branch
 C_BR=$(git branch --show-current)
 
-# 2. Mode selection: commit hash > commit count > source branch
-if [ -n "$COMMIT_HASH_RAW" ]; then
-    # ── Commit hash mode ──
-    if ! git cat-file -e "${COMMIT_HASH_RAW}^{commit}" 2>/dev/null; then
-        echo "BLOCK: Commit $COMMIT_HASH_RAW not found. Aborting."
-        exit 0
+# Attempt to get source branch via reflog
+O_BR=$(git reflog show "$C_BR" 2>/dev/null | awk '/Created from/ {print $NF; exit}')
+O_BR_COMPARE="${O_BR#remotes/}"   
+O_BR_COMPARE="${O_BR_COMPARE#origin/}" 
+
+# [Key fix]: Handle reflog missing or pointing to remote self (e.g. after re-clone)
+if [ -z "$O_BR" ] || [ "$C_BR" == "$O_BR_COMPARE" ]; then
+    # Try to read the remote's configured default branch (usually main or master)
+    DEFAULT_BR=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+    
+    # If symbolic-ref fails, probe for common default branches
+    if [ -z "$DEFAULT_BR" ]; then
+        for br in main master develop; do
+            # Check if remote has this branch
+            if git rev-parse --verify "origin/$br" >/dev/null 2>&1; then
+                DEFAULT_BR="$br"
+                break
+            fi
+        done
     fi
-    FULL_HASH=$(git rev-parse "$COMMIT_HASH_RAW")
-    DIFF_REF="$FULL_HASH"
-    BRANCHES_LABEL="${COMMIT_HASH_RAW} -> HEAD (${C_BR})"
-elif [ -n "$COMMIT_COUNT_RAW" ] && echo "$COMMIT_COUNT_RAW" | grep -qE '^[0-9]+$' && [ "$COMMIT_COUNT_RAW" -gt 0 ]; then
-    # ── Commit count mode ──
-    ACTUAL_COUNT=$(git rev-list --count HEAD)
-    if [ "$COMMIT_COUNT_RAW" -gt "$ACTUAL_COUNT" ]; then
-        echo "BLOCK: Total commits ($ACTUAL_COUNT) is less than requested $COMMIT_COUNT_RAW. Aborting."
-        exit 0
+    
+    # Fall back to the detected default branch
+    if [ -n "$DEFAULT_BR" ]; then
+        O_BR="origin/$DEFAULT_BR"
+        O_BR_COMPARE="$DEFAULT_BR"
     fi
-    DIFF_REF="HEAD~${COMMIT_COUNT_RAW}"
-    BRANCHES_LABEL="Last ${COMMIT_COUNT_RAW} commit(s) (${C_BR})"
-else
-    # ── Source branch mode (original logic) ──
-    O_BR=$(git reflog show "$C_BR" | awk '/Created from/ {print $NF; exit}')
-    if [ -z "$O_BR" ]; then
-        echo "BLOCK: Source branch not found. Aborting."
-        exit 0
-    fi
-    O_BR_COMPARE="${O_BR#remotes/}"
-    O_BR_COMPARE="${O_BR_COMPARE#origin/}"
-    if [ "$C_BR" == "$O_BR" ] || [ "$C_BR" == "$O_BR_COMPARE" ]; then
-        echo "BLOCK: Current branch ($C_BR) and source branch ($O_BR) are the same logical branch or have no new commits. Aborting."
-        exit 0
-    fi
-    DIFF_REF="$O_BR"
-    BRANCHES_LABEL="$O_BR -> $C_BR"
 fi
 
-# 3. Get Diff
+# 3. Block logic
+if [ -z "$O_BR" ] || [ -z "$O_BR_COMPARE" ]; then
+    echo "BLOCK: Source branch not found and no default branch matched. Aborting."
+    exit 0
+fi
+
+if [ "$C_BR" == "$O_BR_COMPARE" ]; then
+    echo "BLOCK: Current branch ($C_BR) is the source branch ($O_BR_COMPARE). No review needed. Aborting."
+    exit 0
+fi
+
+# 4. Get Diff and assemble context
 DIFF_TMP="/tmp/git_diff_raw_$(date +%s).txt"
 FINAL_TMP="/tmp/git_diff_final_$(date +%s).txt"
 
-git diff "$DIFF_REF" HEAD > "$DIFF_TMP"
+# Get code diff (using origin-prefixed $O_BR for precise diff)
+git diff "$O_BR" HEAD > "$DIFF_TMP"
 
+# Check if there are substantive changes
 if [ ! -s "$DIFF_TMP" ]; then
-    echo "BLOCK: No substantive code changes found in the specified range. Aborting."
+    echo "BLOCK: Current branch ($C_BR) differs from source ($O_BR) but has no substantive code changes. Aborting."
     rm -f "$DIFF_TMP"
     exit 0
 fi
 
+# Assemble context info and merge with diff for the model
 echo "REPOSITORY_NAME: $REPO_NAME" > "$FINAL_TMP"
 echo "TARGET_COMPONENT: $CLEAN_PATH" >> "$FINAL_TMP"
-echo "BRANCHES: $BRANCHES_LABEL" >> "$FINAL_TMP"
+echo "BRANCHES: $O_BR -> $C_BR" >> "$FINAL_TMP"
 echo "=========================================" >> "$FINAL_TMP"
 cat "$DIFF_TMP" >> "$FINAL_TMP"
 
+# Output final content and clean up
 cat "$FINAL_TMP"
 rm -f "$DIFF_TMP" "$FINAL_TMP"
 ```
@@ -124,8 +132,21 @@ After obtaining the diff output from Step 1, **strictly apply the following logi
 1. If Step 1 output contains `BLOCK:`, immediately end the Code Review and briefly explain the reason to the user (e.g. source branch not found, no valid new commits, etc.).
 2. If no block string is present, proceed with the deep Code Review.
 
-**Review requirements**: Skip auto-generated files (e.g. package-lock.json). Focus hard on logic bugs, boundary gaps, readability/naming, performance optimizations, and security vulnerabilities.
+**Review requirements**: Skip auto-generated files (e.g. package-lock.json). **Before reviewing, extract all changed files from the diff, review file by file in alphabetical order. Within each file, process every `+` line change independently — do not merge or skip any change point. For each `+` line change, scan strictly in the following 6-item order, each item must yield a clear conclusion (found/not found), none may be skipped**:
+1. Security vulnerabilities (injection, privilege escalation, sensitive data exposure, OWASP Top 10)
+2. **Crashes & exceptions (zero tolerance)**: null pointer dereference, array/collection out-of-bounds access, forced type cast failure, division by zero, uncaught exceptions, unreleased resources (file handles/database connections/memory leaks), thread safety issues (race conditions/deadlocks), stack overflow, infinite recursion, any code that may cause a crash or throw an unhandled exception
+3. Logic errors & boundary gaps (including conditionals, loops, concurrency)
+4. Performance issues (time complexity, redundant computation, memory leaks)
+5. Code standards & readability (naming, redundant logic, magic numbers)
+6. Refactoring opportunities (abstractable logic, duplicate code)
 
+**Classification rules (strictly enforced, no subjective judgment)**:
+- 🚫 Critical Issues: meets ANY of the following → (a) can cause program crash/abnormal exit (including null pointer, out-of-bounds, uncaught exception, deadlock, stack overflow, and all runtime crash risks) (b) security vulnerability exists (c) data loss or corruption (d) build/compilation failure. Scan items 1 and 2 results **always** go here, must not be downgraded to improvement suggestions.
+- ⚠️ Improvement Suggestions: does not meet critical issue criteria, but belongs to issues found in scan items 3, 4, 5.
+- 💡 Elegant Refactoring: scan item 6 results, or structural optimizations to existing implementations.
+
+**Ordering rules**: Within the same category, order by filename alphabetically; within the same file, order by line number ascending. Each independent code location corresponds to one opinion — do not merge or split.
+**Only report issues explicitly present in the diff. Do not speculate or add content beyond the diff.**
 **Output requirements (mandatory, non-skippable)**:
 
 - **Must** use the Write file tool (do NOT output content to chat as a substitute for writing the file)
@@ -145,11 +166,11 @@ Use the following structure strictly in the generated Markdown file — do not f
 
 ## 🚨 Deep Review Findings
 
-*(Fill in the following three categories as needed; omit any category with no findings)*
+*(All three categories must be output. If a category has no findings, write: `No issues of this type found in this change.` — do not omit the category heading.)*
 
 ### 🚫 Critical Issues
 
-*List only issues that cause crashes, security vulnerabilities, severe logic errors, or build failures.*
+*List only issues meeting the critical classification criteria (crash/unhandled exception/security vulnerability/data corruption/build failure). **Any code that may cause a runtime crash or throw an unhandled exception must be listed here and must not be downgraded.** Issues not meeting criteria go to Improvement Suggestions.*
 
 * **Issue**: [Precise description of the defect]
 
@@ -157,11 +178,11 @@ Use the following structure strictly in the generated Markdown file — do not f
 
 * **Location**: Line L[start] - L[end]
 
-* **Before vs After diff**:
+* **Branch diff comparison**:
 
   ```javascript
-  // Original branch code
-  [Extract original branch code block in full]
+  // Source branch code
+  [Extract source branch code block in full]
   
   // Current branch changed code
   [Extract current branch changed code in full]
@@ -181,7 +202,7 @@ Use the following structure strictly in the generated Markdown file — do not f
 
 ### ⚠️ Improvement Suggestions
 
-*List all optimization points related to code standards, readability, redundant logic, and best practices.*
+*List all issues not meeting critical criteria but belonging to logic errors/boundary gaps/performance issues/code standards. Order by filename alphabetically, then line number ascending.*
 
 * **Suggestion**: [Describe the suggestion, e.g. use Optional Chaining instead of nested if checks]
 
@@ -189,11 +210,11 @@ Use the following structure strictly in the generated Markdown file — do not f
 
 * **Location**: Line L[start] - L[end]
 
-* **Before vs After diff**:
+* **Branch diff comparison**:
 
   ```javascript
-  // Original branch code
-  [Extract original branch code block in full]
+  // Source branch code
+  [Extract source branch code block in full]
   
   // Current branch changed code
   [Extract current branch changed code in full]
@@ -217,11 +238,11 @@ Use the following structure strictly in the generated Markdown file — do not f
 
 * **Location**: Line L[start] - L[end]
 
-* **Before vs After diff**:
+* **Branch diff comparison**:
 
   ```javascript
-  // Original branch code
-  [Extract original branch code block in full]
+  // Source branch code
+  [Extract source branch code block in full]
   
   // Current branch changed code
   [Extract current branch changed code in full]
@@ -241,12 +262,12 @@ Use the following structure strictly in the generated Markdown file — do not f
 
 ## 🏁 Summary
 
-* **Overall rating**: [Score 1–10, briefly describe the robustness and cleanliness of this commit]
+* **Overall rating**: [Calculate by formula: 10 - (critical count × 3) - (improvement count × 0.5) - (refactoring count × 0.2), minimum 1, one decimal place. Format: X.X (critical × N, improvement × N, refactoring × N)]
 * **Key risk**: [One sentence summarizing the most critical change to watch]
 
 ---
 
 ## Constraints
 
-- Output must be in English.
+- Output in the same language the user is using.
 - Be concise and direct. No filler or excessive pleasantries.
