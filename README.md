@@ -18,9 +18,10 @@ Single-repo Code Review Expert. Extracts the current branch diff via Git, perfor
 
 ### Features
 
-- **Four diff modes** — commit hash, time range, commit count, or source branch comparison (priority: hash > time > count > source)
+- **Four diff modes** — commit hash *(not yet implemented)*, time range, commit count *(not yet implemented)*, or source branch comparison (priority: hash > time > count > source)
 - **Time range support** — "today", "last 3 days", "last week", "last 2 hours" etc.
 - **Component path scoping** — `@src/auth/` to limit review to a subdirectory
+- **Change statistics** — auto-counts files, added/deleted/net lines, and commits before scanning
 - **Deep review** — 6-dimension scan (security, crash/exception, logic errors, performance, code style, refactoring)
 - **Structured Markdown report** — written to file via `references/report-template.md`
 
@@ -28,11 +29,12 @@ Single-repo Code Review Expert. Extracts the current branch diff via Git, perfor
 
 ```
 /code-review-single                    # Source branch (default)
-/code-review-single abc1234            # Commit hash → HEAD
 /code-review-single today              # Today's commits
 /code-review-single last 3 days        # Last 3 days
 /code-review-single @src/auth/         # Scoped to component
 ```
+
+> **Note:** commit hash and commit count modes are not yet implemented. Passing them is silently ignored and falls back to source branch comparison.
 
 ### Output
 
@@ -60,11 +62,12 @@ code-review-single-skill/
 
 | Section | Description |
 |---|---|
+| 📊 Change Statistics | File count, added/deleted/net lines, commit count, per-file change type |
 | 📝 Change Summary | Concise overview of what changed |
-| 🚫 Critical Issues | Crashes, security holes, data corruption, build failures |
-| ⚠️ Improvement Suggestions | Logic errors, boundary gaps, performance, code style |
-| 💡 Elegant Refactoring | Concrete refactoring proposals with before/after diffs |
-| 🏁 Summary | Score 1–10 + key risk |
+| 🚨 Deep Review — 🚫 Critical Issues | Crashes, security holes, data corruption, build failures |
+| 🚨 Deep Review — ⚠️ Improvement Suggestions | Logic errors, boundary gaps, performance, code style |
+| 🚨 Deep Review — 💡 Elegant Refactoring | Concrete refactoring proposals with before/after diffs |
+| 🏁 Summary | Score formula: `10 − (critical×3) − (standard×0.5) − (refactor×0.2)`, min 1.0 |
 
 ## Block Conditions
 
@@ -74,7 +77,7 @@ code-review-single-skill/
 | Commit hash not found | single |
 | No valid changes in range | single |
 | Source branch not found / same as current | single |
-| Unparseable time range | single |
+| Unparseable time range (prompts user for clarification) | single |
 
 ## Constraints
 
@@ -82,6 +85,7 @@ code-review-single-skill/
 - Auto-generated files (e.g. `package-lock.json`) are skipped
 - Reports written to file, not printed to chat
 - Each finding is independent — no merging or splitting
+- **Non-linear history note:** In repos with merge commits or cherry-picks, time-range mode diffs from the oldest in-range commit's parent to HEAD — may include a small number of out-of-range commits. This limitation is noted in the report's change summary.
 
 ## License
 
