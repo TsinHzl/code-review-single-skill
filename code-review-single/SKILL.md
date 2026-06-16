@@ -49,20 +49,7 @@ bash "${HOME}/.claude/skills/code-review-single/scripts/code-review-single-env.s
 
 若 Step 1 输出含 `BLOCK:` → 向用户简述阻断原因，结束。
 
-否则逐文件（字母序）、逐 `+` 行变更，按以下 6 项顺序扫描：
-1. 安全漏洞（OWASP Top 10）
-2. 崩溃与异常（零容忍：空指针、越界、未捕获异常、死锁、栈溢出等）
-3. 逻辑错误与边界遗漏
-4. 性能问题
-5. 代码规范与可读性
-6. 重构机会
-
-**分类规则**：
-- 🚫 严重问题：崩溃/安全漏洞/数据损坏/构建失败（第 1、2 项一律归此类）
-- ⚠️ 改进建议：第 3、4、5 项发现
-- 💡 优雅重构：第 6 项发现
-
-**输出**：调用 Write 工具写入 `<工作目录>/<TARGET_COMPONENT>-code-review.md`，报告模板见 [references/report-template.md](references/report-template.md)。
+否则读取 [references/step2-review.md](references/step2-review.md) 并严格执行。
 
 ## Constraints
 
