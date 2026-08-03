@@ -30,7 +30,7 @@
 - **数据源**：变更统计输入是 Step 1 stdout 中 `=====` 分隔线之后的 diff 全文（参见 [review-rules.md](review-rules.md)），不要反向聚合 shard 文件
 - 变更统计由主 agent 独立计算（不复用 sub-agent 结果）
 - 总评按 [report-template.md](report-template.md) 公式计算
-- 套用文件骨架后调用 Write 写入 `<工作目录>/<TARGET_COMPONENT>-code-review.md`
+- 套用文件骨架后，按文件命名规则（`cr-result.md`，已存在则依次追加 `-1`、`-2`……取第一个不存在的编号）调用 Write 写入 `<工作目录>`
 - 若 `failed_shards` 非空，在文件末尾追加：`> ⚠️ 分片 [<失败编号列表>] 审查失败，以上结果可能不完整，建议重跑或缩小范围`
 
 ## 4. 清理 shard 临时文件
